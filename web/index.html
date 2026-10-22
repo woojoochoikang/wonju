@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>원주 응급 분류 파이프라인</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #1b1f24; --muted: #5f6b7a; --line: #e2e6eb;
+    --accent: #2357d9; --warn: #b26b00; --err: #c62828; --ok: #1f7a3d;
+    --k1: #1565c0; --k2: #c62828; --k3: #e6a100; --k4: #2e7d32; --k5: #f4f6f8;
+    --k5-text: #1b1f24;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111418; --card: #1a1e24; --text: #e7eaee; --muted: #9aa5b1; --line: #2c333c;
+      --accent: #7aa2ff; --warn: #f0a640; --err: #ff6b6b; --ok: #5fcf85; --k5: #e7eaee; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  textarea, input, select { width: 100%; font: inherit; color: inherit; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+  textarea { min-height: 84px; resize: vertical; }
+  button { font: inherit; border: 0; border-radius: 8px; padding: 10px 18px; cursor: pointer;
+    background: var(--accent); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 12px; }
+  .chip { background: transparent; color: var(--accent); border: 1px solid var(--line); font-weight: 500; padding: 4px 10px; font-size: 13px; }
+  details summary { cursor: pointer; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
+  label { font-size: 13px; color: var(--muted); display: block; }
+  label input { margin-top: 4px; }
+  .hint { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+  .steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+  .steps li { display: grid; grid-template-columns: 22px 130px 1fr; gap: 8px; align-items: baseline; font-size: 14px; }
+  .steps .msg { color: var(--muted); overflow-wrap: anywhere; }
+  .s-run .ico::before { content: "…"; color: var(--accent); }
+  .s-done .ico::before { content: "✓"; color: var(--ok); }
+  .s-warn .ico::before { content: "!"; color: var(--warn); font-weight: 700; }
+  .s-error .ico::before { content: "✕"; color: var(--err); }
+  .s-wait .ico::before { content: "·"; color: var(--muted); }
+  .ktas { display: flex; gap: 16px; align-items: center; }
+  .badge { width: 72px; height: 72px; border-radius: 12px; display: grid; place-items: center; color: #fff; flex: none; text-align: center; line-height: 1.1; }
+  .badge b { font-size: 28px; display: block; }
+  .badge small { font-size: 11px; }
+  .lv1 { background: var(--k1); } .lv2 { background: var(--k2); } .lv3 { background: var(--k3); color: #1b1f24; }
+  .lv4 { background: var(--k4); } .lv5 { background: var(--k5); color: var(--k5-text); border: 1px solid var(--line); }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); }
+  .tag.red { border-color: var(--err); color: var(--err); }
+  dl { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; margin: 14px 0 0; font-size: 14px; }
+  dt { color: var(--muted); } dd { margin: 0; }
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; }
+  tr.no td { color: var(--muted); }
+  .ok { color: var(--ok); font-weight: 600; } .miss { color: var(--err); }
+  .chunk { border-top: 1px solid var(--line); padding: 10px 0; font-size: 13px; }
+  .chunk pre { white-space: pre-wrap; margin: 6px 0 0; color: var(--muted); max-height: 180px; overflow: auto; font: inherit; }
+  .notice { font-size: 13px; color: var(--warn); }
+  .disclaimer { font-size: 12px; color: var(--muted); text-align: center; margin-top: 24px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>원주 응급 분류 파이프라인</h1>
+  <p class="sub">증상 입력 → KTAS 기준 검색 → LLM 판단 → 병상 조회 → 병원 매칭 (구조 검증용 프로토타입)</p>
+
+  <section class="card">
+    <details id="settings">
+      <summary>설정 (API 키)</summary>
+      <div class="grid">
+        <label>Claude API 키 (비우면 목업)
+          <input id="anthropicApiKey" type="password" autocomplete="off" placeholder="sk-ant-...">
+        </label>
+        <label>Claude 모델
+          <input id="claudeModel" autocomplete="off">
+        </label>
+        <label>병상 API 인증키 (비우면 목업)
+          <input id="bedApiKey" type="password" autocomplete="off" placeholder="공공데이터포털 인증키">
+        </label>
+      </div>
+      <p class="hint">키는 이 탭의 메모리에만 있고 저장되지 않습니다. 브라우저에서 API를 직접 부르므로 키가 노출될 수 있어 개발·시연용으로만 쓰세요.</p>
+    </details>
+  </section>
+
+  <section class="card">
+    <h2>증상 입력</h2>
+    <textarea id="symptom" placeholder="예: 아버지가 갑자기 말이 어눌해지고 오른쪽 팔에 힘이 없어요"></textarea>
+    <div class="chips" id="examples"></div>
+    <button id="run">분류 실행</button>
+  </section>
+
+  <section class="card" id="progressCard" hidden>
+    <h2>진행 상황</h2>
+    <ul class="steps" id="steps"></ul>
+  </section>
+
+  <section class="card" id="triageCard" hidden></section>
+  <section class="card" id="hospitalCard" hidden></section>
+  <section class="card" id="chunkCard" hidden></section>
+
+  <p class="disclaimer">이 도구는 의료진 판단을 대신하지 않습니다. 생명이 위급하면 즉시 119에 신고하세요.</p>
+</main>
+
+<script type="module">
+import { config } from './js/config.js';
+import { runPipeline, STEPS } from './js/pipeline.js';
+import { RESOURCE_FIELDS } from './js/beds.js';
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+// 설정 입력 ↔ config
+$('claudeModel').value = config.claudeModel;
+for (const key of ['anthropicApiKey', 'claudeModel', 'bedApiKey']) {
+  $(key).addEventListener('input', (e) => (config[key] = e.target.value.trim()));
+}
+
+const EXAMPLES = [
+  '아버지가 갑자기 말이 어눌해지고 오른쪽 팔에 힘이 없어요',
+  '3살 아이가 40도 고열에 경련을 해요',
+  '가슴이 쥐어짜듯 아프고 식은땀이 나요',
+  '발목을 접질렸는데 붓고 디딜 수가 없어요',
+];
+$('examples').innerHTML = EXAMPLES.map((t) => `<button class="chip" type="button">${esc(t)}</button>`).join('');
+$('examples').addEventListener('click', (e) => {
+  if (e.target.matches('.chip')) $('symptom').value = e.target.textContent;
+});
+
+const LEVEL_NAME = { 1: '소생', 2: '긴급', 3: '응급', 4: '준응급', 5: '비응급' };
+
+function renderSteps() {
+  $('steps').innerHTML = STEPS.map((s) => `<li id="step-${s.id}" class="s-wait"><span class="ico"></span><span>${s.label}</span><span class="msg"></span></li>`).join('');
+}
+function onStep(id, status, msg = '') {
+  const li = $(`step-${id}`);
+  li.className = `s-${status}`;
+  li.querySelector('.msg').textContent = msg;
+}
+
+function renderTriage(t) {
+  const list = (arr, cls = '') => (arr?.length ? `<div class="tags">${arr.map((x) => `<span class="tag ${cls}">${esc(x)}</span>`).join('')}</div>` : '-');
+  $('triageCard').innerHTML = `
+    <h2>판단 결과 ${t.mock ? '<span class="notice">(목업 — Claude API 키를 넣으면 실제 판단)</span>' : ''}</h2>
+    <div class="ktas">
+      <div class="badge lv${t.ktas_level}"><div><b>${t.ktas_level}</b><small>KTAS ${LEVEL_NAME[t.ktas_level] ?? ''}</small></div></div>
+      <div><strong>${esc(t.population)} · ${esc(t.chief_complaint)}</strong><br>${esc(t.advice)}</div>
+    </div>
+    <dl>
+      <dt>판단 근거</dt><dd>${esc(t.reasoning)}</dd>
+      <dt>위험 신호</dt><dd>${list(t.red_flags, 'red')}</dd>
+      <dt>추가 확인</dt><dd>${list(t.missing_info)}</dd>
+      <dt>필요 자원</dt><dd>${list(t.required_resources)}</dd>
+      <dt>우선 진료과</dt><dd>${esc(t.recommended_dept)}</dd>
+    </dl>`;
+  $('triageCard').hidden = false;
+}
+
+function renderHospitals(out) {
+  const need = out.triage.required_resources ?? [];
+  const cell = (h, r) => {
+    const v = h[RESOURCE_FIELDS[r]];
+    const has = typeof v === 'number' ? v > 0 : v === 'Y';
+    return `<td class="${has ? '' : 'miss'}">${esc(v ?? '-')}</td>`;
+  };
+  $('hospitalCard').innerHTML = `
+    <h2>추천 병원 ${out.beds.source === 'mock' ? '<span class="notice">(목업 병상 데이터)</span>' : ''}</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>병원</th><th>충족</th>${need.map((r) => `<th>${esc(r)}</th>`).join('')}<th>전화</th></tr></thead>
+      <tbody>${out.hospitals.map((h) => `
+        <tr class="${h.ok ? '' : 'no'}">
+          <td>${esc(h.dutyName)}</td>
+          <td>${h.ok ? '<span class="ok">충족</span>' : `<span class="miss">부족: ${esc(h.missing.join(', '))}</span>`}</td>
+          ${need.map((r) => cell(h, r)).join('')}
+          <td>${esc(h.dutyTel3)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+  $('hospitalCard').hidden = false;
+}
+
+function renderChunks(retrieval) {
+  if (!retrieval?.results?.length) return;
+  $('chunkCard').innerHTML = `
+    <details><summary>검색된 KTAS 기준 ${retrieval.results.length}건 (추정 환자군: ${esc(retrieval.population ?? '단서 없음')})</summary>
+    ${retrieval.results.map((r, i) => `
+      <div class="chunk"><strong>${i + 1}. [${esc(r.population)}] ${esc(r.name)}</strong>
+        <span class="hint">score ${r.score.toFixed(4)} · KTAS ${esc(r.levels?.join(',') ?? '-')}</span>
+        <pre>${esc(r.text)}</pre></div>`).join('')}
+    </details>`;
+  $('chunkCard').hidden = false;
+}
+
+$('run').addEventListener('click', async () => {
+  const symptom = $('symptom').value.trim();
+  if (!symptom) return $('symptom').focus();
+  $('run').disabled = true;
+  for (const id of ['triageCard', 'hospitalCard', 'chunkCard']) $(id).hidden = true;
+  $('progressCard').hidden = false;
+  renderSteps();
+  try {
+    const out = await runPipeline(symptom, onStep);
+    window.lastResult = out; // 개발자도구 콘솔에서 확인용
+    renderTriage(out.triage);
+    if (out.hospitals.length) renderHospitals(out);
+    renderChunks(out.retrieval);
+  } catch (e) {
+    console.error(e);
+  } finally {
+    $('run').disabled = false;
+  }
+});
+</script>
+</body>
+</html>

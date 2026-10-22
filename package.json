@@ -6,7 +6,8 @@
   "scripts": {
     "build:kb": "node src/lib/rag/build-kb.js",
     "test:retrieve": "node src/lib/rag/test-retrieve.js",
-    "eval": "node src/lib/rag/eval.js"
+    "eval": "node src/lib/rag/eval.js",
+    "web": "npx --yes http-server . -p 8080 -c-1"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.1",
